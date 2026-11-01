@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const $=id=>document.getElementById(id), canvas=$('game'), ctx=canvas.getContext('2d');
-const W=800,H=520,keys=new Set();
+const W=800,keys=new Set();let H=520;
 let mode='ready',score=0,best=0,wave=1,lives=3,player,shots=[],enemies=[],bolts=[],particles=[],drops=[],boss=null;
 let spawnClock=0,spawned=0,waveClock=0,fireClock=0,power=0,invincible=0,last=0,time=0,toastClock=0,audio=null,sound=false;
 try{best=Number(localStorage.getItem('retro-star-best'))||0}catch{}
@@ -10,7 +10,21 @@ const ship=['000010000','000111000','000121000','100121001','110121011','1111111
 const alien=['001000100','000101000','001111100','011212110','111111111','101000101','000101000'];
 function sprite(pattern,x,y,scale,colors){pattern.forEach((row,iy)=>[...row].forEach((v,ix)=>{if(v!=='0'){ctx.fillStyle=colors[+v-1];ctx.fillRect(Math.round(x+(ix-row.length/2)*scale),Math.round(y+(iy-pattern.length/2)*scale),scale,scale)}}))}
 function beep(freq=440,duration=.07,type='square',volume=.035){if(!sound)return;try{audio??=new(window.AudioContext||window.webkitAudioContext)();audio.resume();const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.setValueAtTime(freq,audio.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.45,audio.currentTime+duration);g.gain.setValueAtTime(volume,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+duration)}catch{}}
-function hud(){$('score').textContent=String(score).padStart(6,'0');$('best').textContent=String(best).padStart(6,'0');$('wave').textContent=String(wave).padStart(2,'0');$('lives').textContent='♥ '.repeat(lives)+'♡ '.repeat(3-lives)}
+function hudText(id,value){if($(id).textContent!==value)$(id).textContent=value}
+function hud(){
+ document.body.dataset.mode=mode;
+ hudText('score',String(score).padStart(6,'0'));hudText('best',String(best).padStart(6,'0'));hudText('wave',String(wave).padStart(2,'0'));
+ hudText('lives','♥ '.repeat(lives)+'♡ '.repeat(3-lives));hudText('health-count',lives+' / 3');
+ $('health-fill').style.width=(lives/3*100)+'%';$('health-meter').setAttribute('aria-valuenow',lives);$('health-card').dataset.low=String(lives===1);
+ hudText('health-note',lives===0?'ยานถูกทำลาย':lives===1?'ระวัง! เหลือ 1 ชีวิต':lives===2?'เสียเลือดแล้ว ระวังกระสุน':'เลือดเต็ม');
+ const active=mode==='playing'||mode==='paused';
+ hudText('weapon',power>0?'กระสุน 3 ทิศทาง':'กระสุนปกติ');hudText('power-time',power>0?'เหลือ '+power.toFixed(1)+' วินาที':'เก็บ ✦ เพื่ออัปเกรด');$('power-fill').style.width=(power/8*100)+'%';
+ hudText('ship-status',mode==='ready'?'รอเริ่ม':mode==='over'?'จบภารกิจ':mode==='paused'?'หยุดพัก':invincible>0?'เกราะคุ้มกัน '+Math.ceil(invincible)+' วินาที':'กำลังต่อสู้');
+ hudText('enemy-count',!active?'บอสทุก 3 ด่าน':boss?'ด่านบอส':'ศัตรูเหลือ '+(Math.max(0,8+wave*3-spawned)+enemies.filter(e=>e.hp>0).length));
+ $('boss-panel').hidden=!boss;if(boss){hudText('boss-hp',boss.hp+' / '+boss.max);const percent=Math.round(boss.hp/boss.max*100);$('boss-fill').style.width=percent+'%';$('boss-meter').setAttribute('aria-valuenow',percent)}
+ $('pause').disabled=!active;hudText('pause',mode==='paused'?'▶ เล่นต่อ':'Ⅱ พักเกม');$('pause').setAttribute('aria-label',mode==='paused'?'เล่นต่อ':'หยุดเกมชั่วคราว');
+ hudText('state',mode==='ready'?'รอเริ่มภารกิจ':mode==='paused'?'หยุดพัก • เวลาไม่เดิน':mode==='over'?'จบภารกิจ':'กำลังเล่น • SPACE ยิง');
+}
 function announce(text){$('toast').textContent=text;toastClock=2}
 function burst(x,y,color,n=18){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-.5)*260,vy:(Math.random()-.5)*260,life:.3+Math.random()*.5,color})}
 function addScore(n){score+=n;if(score>best){best=score;try{localStorage.setItem('retro-star-best',String(best))}catch{}}hud()}
@@ -49,12 +63,14 @@ function draw(){ctx.fillStyle='#080d1b';ctx.fillRect(0,0,W,H);const glow=ctx.cre
  if(power>0){ctx.fillStyle='#253a2d';ctx.fillRect(player.x-20,player.y+36,40,3);ctx.fillStyle='#b1ff73';ctx.fillRect(player.x-20,player.y+36,40*power/8,3)}
  for(const p of particles){ctx.globalAlpha=Math.min(1,p.life*2);ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,4,4)}ctx.globalAlpha=1;
 }
-function frame(stamp){const dt=Math.min(.04,(stamp-last)/1000||0);last=stamp;update(dt);draw();requestAnimationFrame(frame)}
+function frame(stamp){const dt=Math.min(.04,(stamp-last)/1000||0);last=stamp;update(dt);hud();draw();requestAnimationFrame(frame)}
 document.addEventListener('keydown',e=>{if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)&&!(e.code==='Space'&&e.target.tagName==='BUTTON'))e.preventDefault();if(e.repeat)return;if(e.code==='Enter'&&e.target.tagName!=='BUTTON'){if(mode==='paused')pause();else if(mode!=='playing')start()}else if(e.code==='KeyP'||e.code==='Escape')pause();else if(!(e.code==='Space'&&e.target.tagName==='BUTTON'))keys.add(e.code)});
 document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();if(mode==='playing')pause()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='playing')pause()});
 $('start').onclick=()=>mode==='paused'?pause():start();$('pause').onclick=pause;$('sound').onclick=()=>{sound=!sound;$('sound').textContent='เสียง: '+(sound?'เปิด':'ปิด');$('sound').setAttribute('aria-pressed',String(sound));$('sound').setAttribute('aria-label',sound?'ปิดเสียง':'เปิดเสียง');if(sound)beep(660,.1)};
 document.querySelectorAll('[data-key]').forEach(b=>{b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys.add(b.dataset.key)});for(const event of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(event,()=>keys.delete(b.dataset.key))});
 let dragging=false;function steer(e){const r=canvas.getBoundingClientRect();player.x=Math.max(22,Math.min(W-22,(e.clientX-r.left)*W/r.width));player.y=Math.max(120,Math.min(H-22,(e.clientY-r.top)*H/r.height))}
 canvas.addEventListener('pointerdown',e=>{if(mode!=='playing')return;dragging=true;canvas.setPointerCapture(e.pointerId);steer(e);keys.add('Space')});canvas.addEventListener('pointermove',e=>{if(dragging&&mode==='playing')steer(e)});for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(event,()=>{dragging=false;keys.delete('Space')});
+function resizeArena(){const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;const previous=H;H=Math.max(200,Math.round(W*rect.height/rect.width));canvas.height=H;if(player)player.y=Math.max(120,Math.min(H-22,player.y/previous*H));for(const list of [enemies,shots,bolts,drops,particles,stars])for(const item of list)item.y=item.y/previous*H}
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(resizeArena).observe(canvas);
 hud();requestAnimationFrame(frame);
 })();
